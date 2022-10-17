@@ -1,14 +1,28 @@
+import calendar
 import datetime
-from datetime import datetime
 import json
-
+import random
+from datetime import datetime
+import pandas as pd
 import requests
 from requests.structures import CaseInsensitiveDict
+
+
+def randomDate(year, month):
+    day_count = calendar.monthrange(year, month)[1]
+    t = random.choice(pd.date_range(f"{year}-{month}-01", f"{year}-{month}-{day_count}", freq='D'))
+    return randomDate(year, month) if t.dayofweek == 5 or t.dayofweek == 6 else t
 
 
 def get_day_and_doc(preferred_days, preferred_docs, schedule, is_new):
     preferred_day = ""
     preferred_doc = ""
+    if len(preferred_days) == 0:
+        preferred_day = randomDate(2021, 11).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if len(preferred_docs) == 0:
+            preferred_doc = random.randint(1, 3)
+        else:
+            preferred_doc = preferred_docs[0]
     for day in preferred_days:
         if is_new:
             doc_available = available_new(day, preferred_docs, schedule)
@@ -49,7 +63,7 @@ def schedule_patient(preferred_day, preferred_doc, person_id, schedule):
         "doctorId": preferred_doc,
         "personId": person_id,
         "appointmentTime": appt_date + available_hours[0],
-        "isNewPatientAppointment": True,
+        "isNewPatientAppointment": False,
         "requestId": 0})
 
 
@@ -112,7 +126,6 @@ def main():
             if not datetime(2021, 11, 1) <= time <= datetime(2021, 12, 31):
                 preferred_days.remove(time)
         if request_json["isNew"]:
-            print("new patients can only be scheduled at 3 or 4 pm")
             preferred_day, preferred_doc = get_day_and_doc(preferred_days, request_json["preferredDocs"], schedule,
                                                            True)
             request = schedule_new_patient(preferred_day, preferred_doc, request_json["personId"], schedule)
@@ -124,11 +137,16 @@ def main():
                 if appt["personId"] == request_json["personId"]:
                     if appt["appointmentTime"] in preferred_days:
                         preferred_days.remove(appt["appointmentTime"])
+                        continue
                     for day in preferred_days:
+                        str_day = day
                         day = datetime.strptime(day, "%Y-%m-%dT%H:%M:%SZ")
-                        appt_day = datetime.strptime(appt["appointmentTime"], "%Y-%m-%dT%H:%M:%SZ")
+                        try:
+                            appt_day = datetime.strptime(appt["appointmentTime"], "%Y-%m-%dT%H:%M:%S.%fZ")
+                        except:
+                            appt_day = datetime.strptime(appt["appointmentTime"], "%Y-%m-%dT%H:%M:%SZ")
                         if not (day - appt_day).days >= 7 or (appt_day - day).days >= 7:
-                            preferred_days.remove(day)
+                            preferred_days.remove(str_day)
                             if len(preferred_days) == 0:
                                 print("None of your preferred days are available!")
             preferred_day, preferred_doc = get_day_and_doc(preferred_days, request_json["preferredDocs"], schedule,
@@ -142,10 +160,13 @@ def main():
                 "http://scheduling-interview-2021-265534043.us-west-2.elb.amazonaws.com/api/Scheduling/Schedule?token"
                 "=c5ec4da0-c9e7-4e2d-b890-b38e4c1d2cf1",
                 headers=headers, json=request)
-            print(response.status_code)
+            print(response.reason)
+            print(
+                "Scheduled patient " + str(request["personId"]) + " with doctor " + str(request["doctorId"]) + " at " +
+                request["appointmentTime"])
         except:
             print(response.status_code)
-        print("Scheduled patient " + str(request.personId) + " with doctor " + str(request.doctorId) + " at " + request.appointmentTime)
+            print(response.reason)
         next_request = requests.get(
             "http://scheduling-interview-2021-265534043.us-west-2.elb.amazonaws.com/api/Scheduling/AppointmentRequest"
             "?token=c5ec4da0-c9e7-4e2d-b890-b38e4c1d2cf1",
